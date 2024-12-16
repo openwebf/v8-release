@@ -71,11 +71,17 @@ class V8_EXPORT CageBaseGlobal final {
 
 class V8_TRIVIAL_ABI CompressedPointer final {
  public:
+  struct AtomicInitializerTag {};
+
   using IntegralType = uint32_t;
   static constexpr auto kWriteBarrierSlotType =
       WriteBarrierSlotType::kCompressed;
 
   V8_INLINE CompressedPointer() : value_(0u) {}
+  V8_INLINE explicit CompressedPointer(const void* value,
+                                       AtomicInitializerTag) {
+    StoreAtomic(value);
+  }
   V8_INLINE explicit CompressedPointer(const void* ptr)
       : value_(Compress(ptr)) {}
   V8_INLINE explicit CompressedPointer(std::nullptr_t) : value_(0u) {}
@@ -158,6 +164,12 @@ class V8_TRIVIAL_ABI CompressedPointer final {
   static V8_INLINE void* Decompress(IntegralType ptr) {
     CPPGC_DCHECK(CageBaseGlobal::IsSet());
     const uintptr_t base = CageBaseGlobal::Get();
+    return Decompress(ptr, base);
+  }
+
+  static V8_INLINE void* Decompress(IntegralType ptr, uintptr_t base) {
+    CPPGC_DCHECK(CageBaseGlobal::IsSet());
+    CPPGC_DCHECK(base == CageBaseGlobal::Get());
     // Treat compressed pointer as signed and cast it to uint64_t, which will
     // sign-extend it.
 #if defined(CPPGC_2GB_CAGE)
@@ -190,11 +202,16 @@ class V8_TRIVIAL_ABI CompressedPointer final {
 
 class V8_TRIVIAL_ABI RawPointer final {
  public:
+  struct AtomicInitializerTag {};
+
   using IntegralType = uintptr_t;
   static constexpr auto kWriteBarrierSlotType =
       WriteBarrierSlotType::kUncompressed;
 
   V8_INLINE RawPointer() : ptr_(nullptr) {}
+  V8_INLINE explicit RawPointer(const void* ptr, AtomicInitializerTag) {
+    StoreAtomic(ptr);
+  }
   V8_INLINE explicit RawPointer(const void* ptr) : ptr_(ptr) {}
 
   V8_INLINE const void* Load() const { return ptr_; }
