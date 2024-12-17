@@ -150,11 +150,11 @@ class V8_EXPORT V8_NODISCARD HandleScope {
 
 /**
  * A base class for local handles.
- * Its implementation depends on whether direct handle support is enabled.
+ * Its implementation depends on whether direct local support is enabled.
  * When it is, a local handle contains a direct pointer to the referenced
  * object, otherwise it contains an indirect pointer.
  */
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
 
 template <typename T>
 class LocalBase : public api_internal::DirectHandleBase {
@@ -181,14 +181,9 @@ class LocalBase : public api_internal::DirectHandleBase {
   V8_INLINE static LocalBase<T> FromSlot(internal::Address* slot) {
     return LocalBase<T>(*slot);
   }
-
-  V8_INLINE static LocalBase<T> FromRepr(
-      internal::ValueHelper::InternalRepresentationType repr) {
-    return LocalBase<T>(repr);
-  }
 };
 
-#else  // !V8_ENABLE_DIRECT_HANDLE
+#else  // !V8_ENABLE_DIRECT_LOCAL
 
 template <typename T>
 class LocalBase : public api_internal::IndirectHandleBase {
@@ -218,14 +213,9 @@ class LocalBase : public api_internal::IndirectHandleBase {
   V8_INLINE static LocalBase<T> FromSlot(internal::Address* slot) {
     return LocalBase<T>(slot);
   }
-
-  V8_INLINE static LocalBase<T> FromRepr(
-      internal::ValueHelper::InternalRepresentationType repr) {
-    return LocalBase<T>(repr);
-  }
 };
 
-#endif  // V8_ENABLE_DIRECT_HANDLE
+#endif  // V8_ENABLE_DIRECT_LOCAL
 
 /**
  * An object reference managed by the v8 garbage collector.
@@ -404,24 +394,20 @@ class V8_TRIVIAL_ABI Local : public LocalBase<T>,
   explicit Local(const Local<T>& other, no_checking_tag do_not_check)
       : LocalBase<T>(other), StackAllocated(do_not_check) {}
 
-  V8_INLINE explicit Local(const LocalBase<T>& other) : LocalBase<T>(other) {}
-
-  V8_INLINE static Local<T> FromRepr(
-      internal::ValueHelper::InternalRepresentationType repr) {
-    return Local<T>(LocalBase<T>::FromRepr(repr));
-  }
+  V8_INLINE explicit Local<T>(const LocalBase<T>& other)
+      : LocalBase<T>(other) {}
 
   V8_INLINE static Local<T> FromSlot(internal::Address* slot) {
     return Local<T>(LocalBase<T>::FromSlot(slot));
   }
 
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
   friend class TypecheckWitness;
 
   V8_INLINE static Local<T> FromAddress(internal::Address ptr) {
     return Local<T>(LocalBase<T>(ptr));
   }
-#endif  // V8_ENABLE_DIRECT_HANDLE
+#endif  // V8_ENABLE_DIRECT_LOCAL
 
   V8_INLINE static Local<T> New(Isolate* isolate, internal::Address value) {
     return Local<T>(LocalBase<T>::New(isolate, value));
@@ -449,9 +435,8 @@ class V8_TRIVIAL_ABI LocalUnchecked : public Local<T> {
 #if defined(V8_ENABLE_LOCAL_OFF_STACK_CHECK) && V8_HAS_ATTRIBUTE_TRIVIAL_ABI
   // In this case, the check is also enforced in the copy constructor and we
   // need to suppress it.
-  LocalUnchecked(
-      const LocalUnchecked& other) noexcept  // NOLINT(runtime/explicit)
-      : Local<T>(other, Local<T>::do_not_check) {}
+  LocalUnchecked(const LocalUnchecked& other)
+      : Local<T>(other, Local<T>::do_not_check) noexcept {}
   LocalUnchecked& operator=(const LocalUnchecked&) noexcept = default;
 #endif
 
@@ -460,7 +445,7 @@ class V8_TRIVIAL_ABI LocalUnchecked : public Local<T> {
       : Local<T>(other, Local<T>::do_not_check) {}
 };
 
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
 // Off-stack allocated direct locals must be registered as strong roots.
 // For off-stack indirect locals, this is not necessary.
 
@@ -471,9 +456,11 @@ class StrongRootAllocator<LocalUnchecked<T>> : public StrongRootAllocatorBase {
   static_assert(std::is_standard_layout_v<value_type>);
   static_assert(sizeof(value_type) == sizeof(Address));
 
-  template <typename HeapOrIsolateT>
-  explicit StrongRootAllocator(HeapOrIsolateT* heap_or_isolate)
-      : StrongRootAllocatorBase(heap_or_isolate) {}
+  explicit StrongRootAllocator(Heap* heap) : StrongRootAllocatorBase(heap) {}
+  explicit StrongRootAllocator(Isolate* isolate)
+      : StrongRootAllocatorBase(isolate) {}
+  explicit StrongRootAllocator(v8::Isolate* isolate)
+      : StrongRootAllocatorBase(reinterpret_cast<Isolate*>(isolate)) {}
   template <typename U>
   StrongRootAllocator(const StrongRootAllocator<U>& other) noexcept
       : StrongRootAllocatorBase(other) {}
@@ -485,7 +472,7 @@ class StrongRootAllocator<LocalUnchecked<T>> : public StrongRootAllocatorBase {
     return deallocate_impl(reinterpret_cast<Address*>(p), n);
   }
 };
-#endif  // V8_ENABLE_DIRECT_HANDLE
+#endif  // V8_ENABLE_DIRECT_LOCAL
 }  // namespace internal
 
 template <typename T>
@@ -493,7 +480,7 @@ class LocalVector {
  private:
   using element_type = internal::LocalUnchecked<T>;
 
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
   using allocator_type = internal::StrongRootAllocator<element_type>;
 
   static allocator_type make_allocator(Isolate* isolate) noexcept {
@@ -505,7 +492,7 @@ class LocalVector {
   static allocator_type make_allocator(Isolate* isolate) noexcept {
     return allocator_type();
   }
-#endif  // V8_ENABLE_DIRECT_HANDLE
+#endif  // V8_ENABLE_DIRECT_LOCAL
 
   using vector_type = std::vector<element_type, allocator_type>;
 
@@ -579,11 +566,7 @@ class LocalVector {
 
   void push_back(const Local<T>& x) { backing_.push_back(x); }
   void pop_back() { backing_.pop_back(); }
-
-  template <typename... Args>
-  void emplace_back(Args&&... args) {
-    backing_.push_back(value_type{std::forward<Args>(args)...});
-  }
+  void emplace_back(const Local<T>& x) { backing_.emplace_back(x); }
 
   void clear() noexcept { backing_.clear(); }
   void resize(size_t n) { backing_.resize(n); }
@@ -733,7 +716,7 @@ class V8_EXPORT V8_NODISCARD EscapableHandleScope
   V8_INLINE ~EscapableHandleScope() = default;
   template <class T>
   V8_INLINE Local<T> Escape(Local<T> value) {
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
     return value;
 #else
     if (value.IsEmpty()) return value;

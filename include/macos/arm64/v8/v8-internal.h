@@ -18,22 +18,6 @@
 
 #include "v8config.h"  // NOLINT(build/include_directory)
 
-// TODO(pkasting): Use <compare>/spaceship unconditionally after dropping
-// support for old libstdc++ versions.
-#if __has_include(<version>)
-#include <version>
-#endif
-#if defined(__cpp_lib_three_way_comparison) &&   \
-    __cpp_lib_three_way_comparison >= 201711L && \
-    defined(__cpp_lib_concepts) && __cpp_lib_concepts >= 202002L
-#include <compare>
-#include <concepts>
-
-#define V8_HAVE_SPACESHIP_OPERATOR 1
-#else
-#define V8_HAVE_SPACESHIP_OPERATOR 0
-#endif
-
 namespace v8 {
 
 class Array;
@@ -44,9 +28,7 @@ class Isolate;
 namespace internal {
 
 class Heap;
-class LocalHeap;
 class Isolate;
-class LocalIsolate;
 
 typedef uintptr_t Address;
 static constexpr Address kNullAddress = 0;
@@ -162,15 +144,15 @@ struct SmiTagging<8> {
                                                std::is_signed_v<T>>* = nullptr>
   V8_INLINE static constexpr bool IsValidSmi(T value) {
     // To be representable as a long smi, the value must be a 32-bit integer.
-    return std::numeric_limits<int32_t>::min() <= value &&
-           value <= std::numeric_limits<int32_t>::max();
+    return (value == static_cast<int32_t>(value));
   }
 
   template <class T,
             typename std::enable_if_t<std::is_integral_v<T> &&
                                       std::is_unsigned_v<T>>* = nullptr>
   V8_INLINE static constexpr bool IsValidSmi(T value) {
-    return value <= std::numeric_limits<int32_t>::max();
+    return (static_cast<uintptr_t>(value) ==
+            static_cast<uintptr_t>(static_cast<int32_t>(value)));
   }
 };
 
@@ -236,6 +218,10 @@ using SandboxedPointer_t = Address;
 // virtual address space for userspace. As such, limit the sandbox to 128GB (a
 // quarter of the total available address space).
 constexpr size_t kSandboxSizeLog2 = 37;  // 128 GB
+#elif defined(V8_TARGET_ARCH_LOONG64)
+// Some Linux distros on LoongArch64 configured with only 40 bits of virtual
+// address space for userspace. Limit the sandbox to 256GB here.
+constexpr size_t kSandboxSizeLog2 = 38;  // 256 GB
 #else
 // Everywhere else use a 1TB sandbox.
 constexpr size_t kSandboxSizeLog2 = 40;  // 1 TB
@@ -256,12 +242,9 @@ constexpr size_t kSandboxAlignment = kPtrComprCageBaseAlignment;
 constexpr uint64_t kSandboxedPointerShift = 64 - kSandboxSizeLog2;
 
 // Size of the guard regions surrounding the sandbox. This assumes a worst-case
-// scenario of a 32-bit unsigned index used to access an array of 64-bit values
-// with an additional 4GB (compressed pointer) offset. In particular, accesses
-// to TypedArrays are effectively computed as
-// `entry_pointer = array->base + array->offset + index * array->element_size`.
-// See also https://crbug.com/40070746 for more details.
-constexpr size_t kSandboxGuardRegionSize = 32ULL * GB + 4ULL * GB;
+// scenario of a 32-bit unsigned index used to access an array of 64-bit
+// values.
+constexpr size_t kSandboxGuardRegionSize = 32ULL * GB;
 
 static_assert((kSandboxGuardRegionSize % kSandboxAlignment) == 0,
               "The size of the guard regions around the sandbox must be a "
@@ -312,8 +295,7 @@ constexpr size_t kExternalPointerTableReservationSize = 256 * MB;
 
 // The external pointer table indices stored in HeapObjects as external
 // pointers are shifted to the left by this amount to guarantee that they are
-// smaller than the maximum table size even after the C++ compiler multiplies
-// them by 8 to be used as indexes into a table of 64 bit pointers.
+// smaller than the maximum table size.
 constexpr uint32_t kExternalPointerIndexShift = 7;
 #else
 constexpr size_t kExternalPointerTableReservationSize = 512 * MB;
@@ -559,73 +541,50 @@ constexpr uint64_t kAllTagsForAndBasedTypeChecking[] = {
   V(kExternalStringResourceTag,                 TAG(1)) \
   V(kExternalStringResourceDataTag,             TAG(2)) \
   V(kLastSharedTag,                             TAG(2))
-  // Leave some space in the tag range here for future shared tags.
 
 // External pointers using these tags are kept in a per-Isolate external
 // pointer table and can only be accessed when this Isolate is active.
 #define PER_ISOLATE_EXTERNAL_POINTER_TAGS(V)             \
-  V(kNativeContextMicrotaskQueueTag,            TAG(5)) \
-  V(kEmbedderDataSlotPayloadTag,                TAG(6)) \
+  V(kNativeContextMicrotaskQueueTag,            TAG(10)) \
+  V(kEmbedderDataSlotPayloadTag,                TAG(11)) \
 /* This tag essentially stands for a `void*` pointer in the V8 API, and */ \
 /* it is the Embedder's responsibility to ensure type safety (against */   \
 /* substitution) and lifetime validity of these objects. */                \
-  V(kExternalObjectValueTag,                    TAG(7)) \
-  V(kFunctionTemplateInfoCallbackTag,           TAG(8)) \
-  V(kAccessorInfoGetterTag,                     TAG(9)) \
-  V(kAccessorInfoSetterTag,                     TAG(10)) \
-  V(kWasmInternalFunctionCallTargetTag,         TAG(11)) \
-  V(kWasmTypeInfoNativeTypeTag,                 TAG(12)) \
-  V(kWasmExportedFunctionDataSignatureTag,      TAG(13)) \
-  V(kWasmContinuationJmpbufTag,                 TAG(14)) \
-  V(kWasmStackMemoryTag,                        TAG(15)) \
-  V(kWasmIndirectFunctionTargetTag,             TAG(16)) \
+  V(kExternalObjectValueTag,                    TAG(12)) \
+  V(kFunctionTemplateInfoCallbackTag,           TAG(13)) \
+  V(kAccessorInfoGetterTag,                     TAG(14)) \
+  V(kAccessorInfoSetterTag,                     TAG(15)) \
+  V(kWasmInternalFunctionCallTargetTag,         TAG(16)) \
+  V(kWasmTypeInfoNativeTypeTag,                 TAG(17)) \
+  V(kWasmExportedFunctionDataSignatureTag,      TAG(18)) \
+  V(kWasmContinuationJmpbufTag,                 TAG(19)) \
+  V(kWasmIndirectFunctionTargetTag,             TAG(20)) \
   /* Foreigns */ \
-  V(kGenericForeignTag,                         TAG(20)) \
-  V(kApiNamedPropertyQueryCallbackTag,          TAG(21)) \
-  V(kApiNamedPropertyGetterCallbackTag,         TAG(22)) \
-  V(kApiNamedPropertySetterCallbackTag,         TAG(23)) \
-  V(kApiNamedPropertyDescriptorCallbackTag,     TAG(24)) \
-  V(kApiNamedPropertyDefinerCallbackTag,        TAG(25)) \
-  V(kApiNamedPropertyDeleterCallbackTag,        TAG(26)) \
-  V(kApiIndexedPropertyQueryCallbackTag,        TAG(27)) \
-  V(kApiIndexedPropertyGetterCallbackTag,       TAG(28)) \
-  V(kApiIndexedPropertySetterCallbackTag,       TAG(29)) \
-  V(kApiIndexedPropertyDescriptorCallbackTag,   TAG(30)) \
-  V(kApiIndexedPropertyDefinerCallbackTag,      TAG(31)) \
-  V(kApiIndexedPropertyDeleterCallbackTag,      TAG(32)) \
-  V(kApiIndexedPropertyEnumeratorCallbackTag,   TAG(33)) \
-  V(kApiAccessCheckCallbackTag,                 TAG(34)) \
-  V(kApiAbortScriptExecutionCallbackTag,        TAG(35)) \
-  V(kSyntheticModuleTag,                        TAG(36)) \
-  V(kMicrotaskCallbackTag,                      TAG(37)) \
-  V(kMicrotaskCallbackDataTag,                  TAG(38)) \
-  V(kCFunctionTag,                              TAG(39)) \
-  V(kCFunctionInfoTag,                          TAG(40)) \
-  V(kMessageListenerTag,                        TAG(41)) \
-  V(kWaiterQueueForeignTag,                     TAG(42)) \
+  V(kGenericForeignTag,                         TAG(30)) \
   /* Managed */ \
-  V(kFirstManagedResourceTag,                   TAG(50)) \
-  V(kGenericManagedTag,                         TAG(50)) \
-  V(kWasmWasmStreamingTag,                      TAG(51)) \
-  V(kWasmFuncDataTag,                           TAG(52)) \
-  V(kWasmManagedDataTag,                        TAG(53)) \
-  V(kWasmNativeModuleTag,                       TAG(54)) \
-  V(kIcuBreakIteratorTag,                       TAG(55)) \
-  V(kIcuUnicodeStringTag,                       TAG(56)) \
-  V(kIcuListFormatterTag,                       TAG(57)) \
-  V(kIcuLocaleTag,                              TAG(58)) \
-  V(kIcuSimpleDateFormatTag,                    TAG(59)) \
-  V(kIcuDateIntervalFormatTag,                  TAG(60)) \
-  V(kIcuRelativeDateTimeFormatterTag,           TAG(61)) \
-  V(kIcuLocalizedNumberFormatterTag,            TAG(62)) \
-  V(kIcuPluralRulesTag,                         TAG(63)) \
-  V(kIcuCollatorTag,                            TAG(64)) \
-  V(kDisplayNamesInternalTag,                   TAG(65)) \
+  V(kFirstManagedResourceTag,                   TAG(40)) \
+  V(kGenericManagedTag,                         TAG(40)) \
+  V(kWasmWasmStreamingTag,                      TAG(41)) \
+  V(kWasmFuncDataTag,                           TAG(42)) \
+  V(kWasmManagedDataTag,                        TAG(43)) \
+  V(kWasmNativeModuleTag,                       TAG(44)) \
+  V(kWasmStackMemoryTag,                        TAG(45)) \
+  V(kIcuBreakIteratorTag,                       TAG(46)) \
+  V(kIcuUnicodeStringTag,                       TAG(47)) \
+  V(kIcuListFormatterTag,                       TAG(48)) \
+  V(kIcuLocaleTag,                              TAG(49)) \
+  V(kIcuSimpleDateFormatTag,                    TAG(50)) \
+  V(kIcuDateIntervalFormatTag,                  TAG(51)) \
+  V(kIcuRelativeDateTimeFormatterTag,           TAG(52)) \
+  V(kIcuLocalizedNumberFormatterTag,            TAG(53)) \
+  V(kIcuPluralRulesTag,                         TAG(54)) \
+  V(kIcuCollatorTag,                            TAG(55)) \
+  V(kDisplayNamesInternalTag,                   TAG(56)) \
   /* External resources whose lifetime is tied to */     \
   /* their entry in the external pointer table but */    \
   /* which are not referenced via a Managed */           \
-  V(kArrayBufferExtensionTag,                   TAG(66)) \
-  V(kLastManagedResourceTag,                    TAG(66)) \
+  V(kArrayBufferExtensionTag,                   TAG(57)) \
+  V(kLastManagedResourceTag,                    TAG(57)) \
 
 // All external pointer tags.
 #define ALL_EXTERNAL_POINTER_TAGS(V) \
@@ -823,29 +782,6 @@ constexpr bool kAllCodeObjectsLiveInTrustedSpace =
     kRuntimeGeneratedCodeObjectsLiveInTrustedSpace &&
     kBuiltinCodeObjectsLiveInTrustedSpace;
 
-//
-// JavaScript Dispatch Table
-//
-// A JSDispatchHandle represents a 32-bit index into a JSDispatchTable.
-using JSDispatchHandle = uint32_t;
-
-constexpr JSDispatchHandle kNullJSDispatchHandle = 0;
-
-// The size of the virtual memory reservation for the JSDispatchTable.
-// As with the other tables, a maximum table size in combination with shifted
-// indices allows omitting bounds checks.
-constexpr size_t kJSDispatchTableReservationSize = 128 * MB;
-constexpr uint32_t kJSDispatchHandleShift = 9;
-
-// The maximum number of entries in a JSDispatchTable.
-constexpr int kJSDispatchTableEntrySize = 16;
-constexpr int kJSDispatchTableEntrySizeLog2 = 4;
-constexpr size_t kMaxJSDispatchEntries =
-    kJSDispatchTableReservationSize / kJSDispatchTableEntrySize;
-static_assert((1 << (32 - kJSDispatchHandleShift)) == kMaxJSDispatchEntries,
-              "kJSDispatchTableReservationSize and kJSDispatchEntryHandleShift "
-              "don't match");
-
 // {obj} must be the raw tagged pointer representation of a HeapObject
 // that's guaranteed to never be in ReadOnlySpace.
 V8_EXPORT internal::Isolate* IsolateFromNeverReadOnlySpaceObject(Address obj);
@@ -903,7 +839,6 @@ class Internals {
   static const int kNumberOfBooleanFlags = 6;
   static const int kErrorMessageParamSize = 1;
   static const int kTablesAlignmentPaddingSize = 1;
-  static const int kRegExpStaticResultOffsetsVectorSize = kApiSystemPointerSize;
   static const int kBuiltinTier0EntryTableSize = 7 * kApiSystemPointerSize;
   static const int kBuiltinTier0TableSize = 7 * kApiSystemPointerSize;
   static const int kLinearAllocationAreaSize = 3 * kApiSystemPointerSize;
@@ -926,9 +861,9 @@ class Internals {
       kIsolateStackGuardOffset + kStackGuardSize;
   static const int kErrorMessageParamOffset =
       kVariousBooleanFlagsOffset + kNumberOfBooleanFlags;
-  static const int kBuiltinTier0EntryTableOffset =
-      kErrorMessageParamOffset + kErrorMessageParamSize +
-      kTablesAlignmentPaddingSize + kRegExpStaticResultOffsetsVectorSize;
+  static const int kBuiltinTier0EntryTableOffset = kErrorMessageParamOffset +
+                                                   kErrorMessageParamSize +
+                                                   kTablesAlignmentPaddingSize;
   static const int kBuiltinTier0TableOffset =
       kBuiltinTier0EntryTableOffset + kBuiltinTier0EntryTableSize;
   static const int kNewAllocationInfoOffset =
@@ -937,8 +872,7 @@ class Internals {
       kNewAllocationInfoOffset + kLinearAllocationAreaSize;
 
   static const int kFastCCallAlignmentPaddingSize =
-      kApiSystemPointerSize == 8 ? 5 * kApiSystemPointerSize
-                                 : 1 * kApiSystemPointerSize;
+      kApiSystemPointerSize == 8 ? 0 : kApiSystemPointerSize;
   static const int kIsolateFastCCallCallerFpOffset =
       kOldAllocationInfoOffset + kLinearAllocationAreaSize +
       kFastCCallAlignmentPaddingSize;
@@ -966,10 +900,12 @@ class Internals {
       kIsolateCppHeapPointerTableOffset + kExternalPointerTableSize;
   static const int kIsolateTrustedPointerTableOffset =
       kIsolateTrustedCageBaseOffset + kApiSystemPointerSize;
-  static const int kIsolateSharedTrustedPointerTableAddressOffset =
+  static const int kIsolateExternalBufferTableOffset =
       kIsolateTrustedPointerTableOffset + kTrustedPointerTableSize;
+  static const int kIsolateSharedExternalBufferTableAddressOffset =
+      kIsolateExternalBufferTableOffset + kExternalBufferTableSize;
   static const int kIsolateApiCallbackThunkArgumentOffset =
-      kIsolateSharedTrustedPointerTableAddressOffset + kApiSystemPointerSize;
+      kIsolateSharedExternalBufferTableAddressOffset + kApiSystemPointerSize;
 #else
   static const int kIsolateApiCallbackThunkArgumentOffset =
       kIsolateCppHeapPointerTableOffset + kExternalPointerTableSize;
@@ -978,27 +914,21 @@ class Internals {
   static const int kIsolateApiCallbackThunkArgumentOffset =
       kIsolateEmbedderDataOffset + kNumIsolateDataSlots * kApiSystemPointerSize;
 #endif  // V8_COMPRESS_POINTERS
-  static const int kIsolateRegexpExecVectorArgumentOffset =
-      kIsolateApiCallbackThunkArgumentOffset + kApiSystemPointerSize;
   static const int kContinuationPreservedEmbedderDataOffset =
-      kIsolateRegexpExecVectorArgumentOffset + kApiSystemPointerSize;
+      kIsolateApiCallbackThunkArgumentOffset + kApiSystemPointerSize;
   static const int kIsolateRootsOffset =
       kContinuationPreservedEmbedderDataOffset + kApiSystemPointerSize;
-
-  // Assert scopes
-  static const int kDisallowGarbageCollectionAlign = alignof(uint32_t);
-  static const int kDisallowGarbageCollectionSize = sizeof(uint32_t);
 
 #if V8_STATIC_ROOTS_BOOL
 
 // These constants are copied from static-roots.h and guarded by static asserts.
 #define EXPORTED_STATIC_ROOTS_PTR_LIST(V) \
-  V(UndefinedValue, 0x11)                 \
-  V(NullValue, 0x2d)                      \
-  V(TrueValue, 0x71)                      \
-  V(FalseValue, 0x55)                     \
-  V(EmptyString, 0x49)                    \
-  V(TheHoleValue, 0x761)
+  V(UndefinedValue, 0x69)                 \
+  V(NullValue, 0x85)                      \
+  V(TrueValue, 0xc9)                      \
+  V(FalseValue, 0xad)                     \
+  V(EmptyString, 0xa1)                    \
+  V(TheHoleValue, 0x741)
 
   using Tagged_t = uint32_t;
   struct StaticReadOnlyRoot {
@@ -1006,9 +936,8 @@ class Internals {
     EXPORTED_STATIC_ROOTS_PTR_LIST(DEF_ROOT)
 #undef DEF_ROOT
 
-    // Use 0 for kStringMapLowerBound since string maps are the first maps.
-    static constexpr Tagged_t kStringMapLowerBound = 0;
-    static constexpr Tagged_t kStringMapUpperBound = 0x425;
+    static constexpr Tagged_t kFirstStringMap = 0xe5;
+    static constexpr Tagged_t kLastStringMap = 0x47d;
 
 #define PLUSONE(...) +1
     static constexpr size_t kNumberOfExportedStaticRoots =
@@ -1048,13 +977,13 @@ class Internals {
 
   // Constants used by PropertyCallbackInfo to check if we should throw when an
   // error occurs.
-  static const int kDontThrow = 0;
-  static const int kThrowOnError = 1;
+  static const int kThrowOnError = 0;
+  static const int kDontThrow = 1;
   static const int kInferShouldThrowMode = 2;
 
   // Soft limit for AdjustAmountofExternalAllocatedMemory. Trigger an
   // incremental GC once the external memory reaches this limit.
-  static constexpr size_t kExternalAllocationSoftLimit = 64 * 1024 * 1024;
+  static constexpr int kExternalAllocationSoftLimit = 64 * 1024 * 1024;
 
 #ifdef V8_MAP_PACKING
   static const uintptr_t kMapWordMetadataMask = 0xffffULL << 48;
@@ -1375,19 +1304,16 @@ class V8_EXPORT StrongRootAllocatorBase {
  public:
   Heap* heap() const { return heap_; }
 
-  friend bool operator==(const StrongRootAllocatorBase& a,
-                         const StrongRootAllocatorBase& b) {
-    // TODO(pkasting): Replace this body with `= default` after dropping support
-    // for old gcc versions.
-    return a.heap_ == b.heap_;
+  bool operator==(const StrongRootAllocatorBase& other) const {
+    return heap_ == other.heap_;
+  }
+  bool operator!=(const StrongRootAllocatorBase& other) const {
+    return heap_ != other.heap_;
   }
 
  protected:
   explicit StrongRootAllocatorBase(Heap* heap) : heap_(heap) {}
-  explicit StrongRootAllocatorBase(LocalHeap* heap);
   explicit StrongRootAllocatorBase(Isolate* isolate);
-  explicit StrongRootAllocatorBase(v8::Isolate* isolate);
-  explicit StrongRootAllocatorBase(LocalIsolate* isolate);
 
   // Allocate/deallocate a range of n elements of type internal::Address.
   Address* allocate_impl(size_t n);
@@ -1407,8 +1333,9 @@ class StrongRootAllocator : private std::allocator<T> {
  public:
   using value_type = T;
 
-  template <typename HeapOrIsolateT>
-  explicit StrongRootAllocator(HeapOrIsolateT*) {}
+  explicit StrongRootAllocator(Heap* heap) {}
+  explicit StrongRootAllocator(Isolate* isolate) {}
+  explicit StrongRootAllocator(v8::Isolate* isolate) {}
   template <typename U>
   StrongRootAllocator(const StrongRootAllocator<U>& other) noexcept {}
 
@@ -1416,61 +1343,22 @@ class StrongRootAllocator : private std::allocator<T> {
   using std::allocator<T>::deallocate;
 };
 
-// TODO(pkasting): Replace with `requires` clauses after dropping support for
-// old gcc versions.
-template <typename Iterator, typename = void>
-inline constexpr bool kHaveIteratorConcept = false;
-template <typename Iterator>
-inline constexpr bool kHaveIteratorConcept<
-    Iterator, std::void_t<typename Iterator::iterator_concept>> = true;
-
-template <typename Iterator, typename = void>
-inline constexpr bool kHaveIteratorCategory = false;
-template <typename Iterator>
-inline constexpr bool kHaveIteratorCategory<
-    Iterator, std::void_t<typename Iterator::iterator_category>> = true;
-
-// Helper struct that contains an `iterator_concept` type alias only when either
-// `Iterator` or `std::iterator_traits<Iterator>` do.
-// Default: no alias.
-template <typename Iterator, typename = void>
-struct MaybeDefineIteratorConcept {};
-// Use `Iterator::iterator_concept` if available.
-template <typename Iterator>
-struct MaybeDefineIteratorConcept<
-    Iterator, std::enable_if_t<kHaveIteratorConcept<Iterator>>> {
-  using iterator_concept = typename Iterator::iterator_concept;
-};
-// Otherwise fall back to `std::iterator_traits<Iterator>` if possible.
-template <typename Iterator>
-struct MaybeDefineIteratorConcept<
-    Iterator, std::enable_if_t<kHaveIteratorCategory<Iterator> &&
-                               !kHaveIteratorConcept<Iterator>>> {
-  // There seems to be no feature-test macro covering this, so use the
-  // presence of `<ranges>` as a crude proxy, since it was added to the
-  // standard as part of the Ranges papers.
-  // TODO(pkasting): Add this unconditionally after dropping support for old
-  // libstdc++ versions.
-#if __has_include(<ranges>)
-  using iterator_concept =
-      typename std::iterator_traits<Iterator>::iterator_concept;
-#endif
-};
-
 // A class of iterators that wrap some different iterator type.
 // If specified, ElementType is the type of element accessed by the wrapper
 // iterator; in this case, the actual reference and pointer types of Iterator
 // must be convertible to ElementType& and ElementType*, respectively.
 template <typename Iterator, typename ElementType = void>
-class WrappedIterator : public MaybeDefineIteratorConcept<Iterator> {
+class WrappedIterator {
  public:
   static_assert(
-      std::is_void_v<ElementType> ||
+      !std::is_void_v<ElementType> ||
       (std::is_convertible_v<typename std::iterator_traits<Iterator>::pointer,
-                             std::add_pointer_t<ElementType>> &&
+                             ElementType*> &&
        std::is_convertible_v<typename std::iterator_traits<Iterator>::reference,
-                             std::add_lvalue_reference_t<ElementType>>));
+                             ElementType&>));
 
+  using iterator_category =
+      typename std::iterator_traits<Iterator>::iterator_category;
   using difference_type =
       typename std::iterator_traits<Iterator>::difference_type;
   using value_type =
@@ -1480,96 +1368,24 @@ class WrappedIterator : public MaybeDefineIteratorConcept<Iterator> {
   using pointer =
       std::conditional_t<std::is_void_v<ElementType>,
                          typename std::iterator_traits<Iterator>::pointer,
-                         std::add_pointer_t<ElementType>>;
+                         ElementType*>;
   using reference =
       std::conditional_t<std::is_void_v<ElementType>,
                          typename std::iterator_traits<Iterator>::reference,
-                         std::add_lvalue_reference_t<ElementType>>;
-  using iterator_category =
-      typename std::iterator_traits<Iterator>::iterator_category;
+                         ElementType&>;
 
-  constexpr WrappedIterator() noexcept = default;
+  constexpr WrappedIterator() noexcept : it_() {}
   constexpr explicit WrappedIterator(Iterator it) noexcept : it_(it) {}
 
-  // TODO(pkasting): Switch to `requires` and concepts after dropping support
-  // for old gcc and libstdc++ versions.
   template <typename OtherIterator, typename OtherElementType,
-            typename = std::enable_if_t<
-                std::is_convertible_v<OtherIterator, Iterator>>>
+            std::enable_if_t<std::is_convertible_v<OtherIterator, Iterator>,
+                             bool> = true>
   constexpr WrappedIterator(
-      const WrappedIterator<OtherIterator, OtherElementType>& other) noexcept
-      : it_(other.base()) {}
+      const WrappedIterator<OtherIterator, OtherElementType>& it) noexcept
+      : it_(it.base()) {}
 
-  [[nodiscard]] constexpr reference operator*() const noexcept { return *it_; }
-  [[nodiscard]] constexpr pointer operator->() const noexcept {
-    return it_.operator->();
-  }
-
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator==(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ == other.base();
-  }
-#if V8_HAVE_SPACESHIP_OPERATOR
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr auto operator<=>(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    if constexpr (std::three_way_comparable_with<Iterator, OtherIterator>) {
-      return it_ <=> other.base();
-    } else if constexpr (std::totally_ordered_with<Iterator, OtherIterator>) {
-      if (it_ < other.base()) {
-        return std::strong_ordering::less;
-      }
-      return (it_ > other.base()) ? std::strong_ordering::greater
-                                  : std::strong_ordering::equal;
-    } else {
-      if (it_ < other.base()) {
-        return std::partial_ordering::less;
-      }
-      if (other.base() < it_) {
-        return std::partial_ordering::greater;
-      }
-      return (it_ == other.base()) ? std::partial_ordering::equivalent
-                                   : std::partial_ordering::unordered;
-    }
-  }
-#else
-  // Assume that if spaceship isn't present, operator rewriting might not be
-  // either.
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator!=(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ != other.base();
-  }
-
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator<(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ < other.base();
-  }
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator<=(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ <= other.base();
-  }
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator>(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ > other.base();
-  }
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr bool operator>=(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ >= other.base();
-  }
-#endif
+  constexpr reference operator*() const noexcept { return *it_; }
+  constexpr pointer operator->() const noexcept { return it_.operator->(); }
 
   constexpr WrappedIterator& operator++() noexcept {
     ++it_;
@@ -1590,68 +1406,116 @@ class WrappedIterator : public MaybeDefineIteratorConcept<Iterator> {
     --(*this);
     return result;
   }
-  [[nodiscard]] constexpr WrappedIterator operator+(
-      difference_type n) const noexcept {
+  constexpr WrappedIterator operator+(difference_type n) const noexcept {
     WrappedIterator result(*this);
     result += n;
     return result;
-  }
-  [[nodiscard]] friend constexpr WrappedIterator operator+(
-      difference_type n, const WrappedIterator& x) noexcept {
-    return x + n;
   }
   constexpr WrappedIterator& operator+=(difference_type n) noexcept {
     it_ += n;
     return *this;
   }
-  [[nodiscard]] constexpr WrappedIterator operator-(
-      difference_type n) const noexcept {
-    return *this + -n;
+  constexpr WrappedIterator operator-(difference_type n) const noexcept {
+    return *this + (-n);
   }
   constexpr WrappedIterator& operator-=(difference_type n) noexcept {
-    return *this += -n;
+    *this += -n;
+    return *this;
   }
-  template <typename OtherIterator, typename OtherElementType>
-  [[nodiscard]] constexpr auto operator-(
-      const WrappedIterator<OtherIterator, OtherElementType>& other)
-      const noexcept {
-    return it_ - other.base();
-  }
-  [[nodiscard]] constexpr reference operator[](
-      difference_type n) const noexcept {
+  constexpr reference operator[](difference_type n) const noexcept {
     return it_[n];
   }
 
-  [[nodiscard]] constexpr const Iterator& base() const noexcept { return it_; }
+  constexpr Iterator base() const noexcept { return it_; }
+
+ private:
+  template <typename OtherIterator, typename OtherElementType>
+  friend class WrappedIterator;
 
  private:
   Iterator it_;
 };
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator==(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return x.base() == y.base();
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator<(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return x.base() < y.base();
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator!=(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return !(x == y);
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator>(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return y < x;
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator>=(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return !(x < y);
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr bool operator<=(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept {
+  return !(y < x);
+}
+
+template <typename Iterator, typename ElementType, typename OtherIterator,
+          typename OtherElementType>
+constexpr auto operator-(
+    const WrappedIterator<Iterator, ElementType>& x,
+    const WrappedIterator<OtherIterator, OtherElementType>& y) noexcept
+    -> decltype(x.base() - y.base()) {
+  return x.base() - y.base();
+}
+
+template <typename Iterator, typename ElementType>
+constexpr WrappedIterator<Iterator> operator+(
+    typename WrappedIterator<Iterator, ElementType>::difference_type n,
+    const WrappedIterator<Iterator, ElementType>& x) noexcept {
+  x += n;
+  return x;
+}
 
 // Helper functions about values contained in handles.
 // A value is either an indirect pointer or a direct pointer, depending on
 // whether direct local support is enabled.
 class ValueHelper final {
  public:
-  // ValueHelper::InternalRepresentationType is an abstract type that
-  // corresponds to the internal representation of v8::Local and essentially
-  // to what T* really is (these two are always in sync). This type is used in
-  // methods like GetDataFromSnapshotOnce that need access to a handle's
-  // internal representation. In particular, if `x` is a `v8::Local<T>`, then
-  // `v8::Local<T>::FromRepr(x.repr())` gives exactly the same handle as `x`.
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
   static constexpr Address kTaggedNullAddress = 1;
-
-  using InternalRepresentationType = internal::Address;
-  static constexpr InternalRepresentationType kEmpty = kTaggedNullAddress;
+  static constexpr Address kEmpty = kTaggedNullAddress;
 #else
-  using InternalRepresentationType = internal::Address*;
-  static constexpr InternalRepresentationType kEmpty = nullptr;
-#endif  // V8_ENABLE_DIRECT_HANDLE
+  static constexpr Address kEmpty = kNullAddress;
+#endif  // V8_ENABLE_DIRECT_LOCAL
 
   template <typename T>
   V8_INLINE static bool IsEmpty(T* value) {
-    return ValueAsRepr(value) == kEmpty;
+    return reinterpret_cast<Address>(value) == kEmpty;
   }
 
   // Returns a handle's "value" for all kinds of abstract handles. For Local,
@@ -1663,7 +1527,7 @@ class ValueHelper final {
     return handle.template value<T>();
   }
 
-#ifdef V8_ENABLE_DIRECT_HANDLE
+#ifdef V8_ENABLE_DIRECT_LOCAL
 
   template <typename T>
   V8_INLINE static Address ValueAsAddress(const T* value) {
@@ -1678,17 +1542,7 @@ class ValueHelper final {
     return *reinterpret_cast<T**>(slot);
   }
 
-  template <typename T>
-  V8_INLINE static InternalRepresentationType ValueAsRepr(const T* value) {
-    return reinterpret_cast<InternalRepresentationType>(value);
-  }
-
-  template <typename T>
-  V8_INLINE static T* ReprAsValue(InternalRepresentationType repr) {
-    return reinterpret_cast<T*>(repr);
-  }
-
-#else  // !V8_ENABLE_DIRECT_HANDLE
+#else  // !V8_ENABLE_DIRECT_LOCAL
 
   template <typename T>
   V8_INLINE static Address ValueAsAddress(const T* value) {
@@ -1700,18 +1554,7 @@ class ValueHelper final {
     return reinterpret_cast<T*>(slot);
   }
 
-  template <typename T>
-  V8_INLINE static InternalRepresentationType ValueAsRepr(const T* value) {
-    return const_cast<InternalRepresentationType>(
-        reinterpret_cast<const Address*>(value));
-  }
-
-  template <typename T>
-  V8_INLINE static T* ReprAsValue(InternalRepresentationType repr) {
-    return reinterpret_cast<T*>(repr);
-  }
-
-#endif  // V8_ENABLE_DIRECT_HANDLE
+#endif  // V8_ENABLE_DIRECT_LOCAL
 };
 
 /**
@@ -1738,13 +1581,6 @@ class HandleHelper final {
 };
 
 V8_EXPORT void VerifyHandleIsNonEmpty(bool is_empty);
-
-// These functions are here just to match friend declarations in
-// XxxCallbackInfo classes allowing these functions to access the internals
-// of the info objects. These functions are supposed to be called by debugger
-// macros.
-void PrintFunctionCallbackInfo(void* function_callback_info);
-void PrintPropertyCallbackInfo(void* property_callback_info);
 
 }  // namespace internal
 }  // namespace v8

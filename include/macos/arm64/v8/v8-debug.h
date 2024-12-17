@@ -131,11 +131,6 @@ class V8_EXPORT StackTrace {
   };
 
   /**
-   * Returns the (unique) ID of this stack trace.
-   */
-  int GetID() const;
-
-  /**
    * Returns a StackFrame at a particular index.
    */
   Local<StackFrame> GetFrame(Isolate* isolate, uint32_t index) const;

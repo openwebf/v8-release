@@ -37,12 +37,11 @@ class V8_EXPORT DefaultPlatform : public Platform {
     return v8_platform_->MonotonicallyIncreasingTime();
   }
 
-  std::shared_ptr<cppgc::TaskRunner> GetForegroundTaskRunner(
-      TaskPriority priority) override {
+  std::shared_ptr<cppgc::TaskRunner> GetForegroundTaskRunner() override {
     // V8's default platform creates a new task runner when passed the
     // `v8::Isolate` pointer the first time. For non-default platforms this will
     // require getting the appropriate task runner.
-    return v8_platform_->GetForegroundTaskRunner(kNoIsolate, priority);
+    return v8_platform_->GetForegroundTaskRunner(kNoIsolate);
   }
 
   std::unique_ptr<cppgc::JobHandle> PostJob(

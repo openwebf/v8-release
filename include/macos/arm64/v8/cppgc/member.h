@@ -38,8 +38,9 @@ class V8_TRIVIAL_ABI MemberBase {
 
   V8_INLINE MemberBase() = default;
   V8_INLINE explicit MemberBase(const void* value) : raw_(value) {}
-  V8_INLINE MemberBase(const void* value, AtomicInitializerTag)
-      : raw_(value, typename RawStorage::AtomicInitializerTag{}) {}
+  V8_INLINE MemberBase(const void* value, AtomicInitializerTag) {
+    SetRawAtomic(value);
+  }
 
   V8_INLINE explicit MemberBase(RawStorage raw) : raw_(raw) {}
   V8_INLINE explicit MemberBase(std::nullptr_t) : raw_(nullptr) {}
@@ -86,7 +87,7 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
   V8_INLINE BasicMember(SentinelPointer s) : Base(s) {}  // NOLINT
   V8_INLINE BasicMember(T* raw) : Base(raw) {            // NOLINT
     InitializingWriteBarrier(raw);
-    CheckPointer(raw);
+    this->CheckPointer(Get());
   }
   V8_INLINE BasicMember(T& raw)  // NOLINT
       : BasicMember(&raw) {}
@@ -102,7 +103,7 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
   V8_INLINE BasicMember(T* raw, AtomicInitializerTag atomic)
       : Base(raw, atomic) {
     InitializingWriteBarrier(raw);
-    CheckPointer(raw);
+    this->CheckPointer(Get());
   }
   V8_INLINE BasicMember(T& raw, AtomicInitializerTag atomic)
       : BasicMember(&raw, atomic) {}
@@ -230,7 +231,7 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
   V8_INLINE BasicMember& operator=(T* other) {
     Base::SetRawAtomic(other);
     AssigningWriteBarrier(other);
-    CheckPointer(other);
+    this->CheckPointer(Get());
     return *this;
   }
 
@@ -289,14 +290,14 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
 
  private:
   V8_INLINE explicit BasicMember(RawStorage raw) : Base(raw) {
-    InitializingWriteBarrier();
-    CheckPointer();
+    InitializingWriteBarrier(Get());
+    this->CheckPointer(Get());
   }
 
   V8_INLINE BasicMember& operator=(RawStorage other) {
     Base::SetRawStorageAtomic(other);
     AssigningWriteBarrier();
-    CheckPointer();
+    this->CheckPointer(Get());
     return *this;
   }
 
@@ -307,10 +308,6 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
   V8_INLINE void InitializingWriteBarrier(T* value) const {
     WriteBarrierPolicy::InitializingBarrier(Base::GetRawSlot(), value);
   }
-  V8_INLINE void InitializingWriteBarrier() const {
-    WriteBarrierPolicy::InitializingBarrier(Base::GetRawSlot(),
-                                            Base::GetRawStorage());
-  }
   V8_INLINE void AssigningWriteBarrier(T* value) const {
     WriteBarrierPolicy::template AssigningBarrier<
         StorageType::kWriteBarrierSlotType>(Base::GetRawSlot(), value);
@@ -319,12 +316,6 @@ class V8_TRIVIAL_ABI BasicMember final : private MemberBase<StorageType>,
     WriteBarrierPolicy::template AssigningBarrier<
         StorageType::kWriteBarrierSlotType>(Base::GetRawSlot(),
                                             Base::GetRawStorage());
-  }
-  V8_INLINE void CheckPointer(T* value) {
-    CheckingPolicy::template CheckPointer<T>(value);
-  }
-  V8_INLINE void CheckPointer() {
-    CheckingPolicy::template CheckPointer<T>(Base::GetRawStorage());
   }
 
   V8_INLINE void ClearFromGC() const { Base::ClearFromGC(); }

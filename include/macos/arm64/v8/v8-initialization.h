@@ -112,18 +112,11 @@ class V8_EXPORT V8 {
     const bool kV8TargetOsIsAndroid = false;
 #endif
 
-#ifdef V8_ENABLE_CHECKS
-    const bool kV8EnableChecks = true;
-#else
-    const bool kV8EnableChecks = false;
-#endif
-
     const int kBuildConfiguration =
         (internal::PointerCompressionIsEnabled() ? kPointerCompression : 0) |
         (internal::SmiValuesAre31Bits() ? k31BitSmis : 0) |
         (internal::SandboxIsEnabled() ? kSandbox : 0) |
-        (kV8TargetOsIsAndroid ? kTargetOsIsAndroid : 0) |
-        (kV8EnableChecks ? kEnableChecks : 0);
+        (kV8TargetOsIsAndroid ? kTargetOsIsAndroid : 0);
     return Initialize(kBuildConfiguration);
   }
 
@@ -295,7 +288,6 @@ class V8_EXPORT V8 {
     k31BitSmis = 1 << 1,
     kSandbox = 1 << 2,
     kTargetOsIsAndroid = 1 << 3,
-    kEnableChecks = 1 << 4,
   };
 
   /**

@@ -9,7 +9,6 @@
 #include <string_view>
 
 #include "v8-data.h"               // NOLINT(build/include_directory)
-#include "v8-exception.h"          // NOLINT(build/include_directory)
 #include "v8-function-callback.h"  // NOLINT(build/include_directory)
 #include "v8-local-handle.h"       // NOLINT(build/include_directory)
 #include "v8-memory-span.h"        // NOLINT(build/include_directory)
@@ -72,6 +71,8 @@ class V8_EXPORT Template : public Data {
    * \param name The name of the property for which an accessor is added.
    * \param getter The callback to invoke when getting the property.
    * \param setter The callback to invoke when setting the property.
+   * \param data A piece of data that will be passed to the getter and setter
+   *   callbacks whenever they are invoked.
    * \param attribute The attributes of the property for which an accessor
    *   is added.
    */
@@ -657,18 +658,6 @@ class V8_EXPORT FunctionTemplate : public Template {
   void SetClassName(Local<String> name);
 
   /**
-   * Set the interface name of the FunctionTemplate. This is provided as
-   * contextual information in an ExceptionPropagationMessage to the embedder.
-   */
-  void SetInterfaceName(Local<String> name);
-
-  /**
-   * Provides information on the type of FunctionTemplate for embedder
-   * exception handling.
-   */
-  void SetExceptionContext(ExceptionContext context);
-
-  /**
    * When set to true, no access check will be performed on the receiver of a
    * function call.  Currently defaults to true, but this is subject to change.
    */
@@ -770,13 +759,36 @@ struct NamedPropertyHandlerConfiguration {
       NamedPropertyDescriptorCallback descriptor,  //
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
-        query(query),
-        deleter(deleter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
-        definer(definer),
-        descriptor(descriptor),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(NamedPropertyXxxCallback)")
+  NamedPropertyHandlerConfiguration(
+      GenericNamedPropertyGetterCallback getter,
+      GenericNamedPropertySetterCallback setter,
+      GenericNamedPropertyQueryCallback query,
+      GenericNamedPropertyDeleterCallback deleter,
+      GenericNamedPropertyEnumeratorCallback enumerator,
+      GenericNamedPropertyDefinerCallback definer,
+      GenericNamedPropertyDescriptorCallback descriptor,
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
         data(data),
         flags(flags) {}
 
@@ -788,10 +800,31 @@ struct NamedPropertyHandlerConfiguration {
       NamedPropertyEnumeratorCallback enumerator = nullptr,
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
-        query(query),
-        deleter(deleter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(nullptr),
+        descriptor(nullptr),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(NamedPropertyXxxCallback)")
+  explicit NamedPropertyHandlerConfiguration(
+      GenericNamedPropertyGetterCallback getter,
+      GenericNamedPropertySetterCallback setter = nullptr,
+      GenericNamedPropertyQueryCallback query = nullptr,
+      GenericNamedPropertyDeleterCallback deleter = nullptr,
+      GenericNamedPropertyEnumeratorCallback enumerator = nullptr,
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
         definer(nullptr),
         descriptor(nullptr),
@@ -807,23 +840,45 @@ struct NamedPropertyHandlerConfiguration {
       NamedPropertyDefinerCallback definer,        //
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
         query(nullptr),
-        deleter(deleter),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
-        definer(definer),
-        descriptor(descriptor),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(NamedPropertyXxxCallback)")
+  NamedPropertyHandlerConfiguration(
+      GenericNamedPropertyGetterCallback getter,
+      GenericNamedPropertySetterCallback setter,
+      GenericNamedPropertyDescriptorCallback descriptor,
+      GenericNamedPropertyDeleterCallback deleter,
+      GenericNamedPropertyEnumeratorCallback enumerator,
+      GenericNamedPropertyDefinerCallback definer,
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(nullptr),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
         data(data),
         flags(flags) {}
 
-  NamedPropertyGetterCallback getter;
-  NamedPropertySetterCallback setter;
-  NamedPropertyQueryCallback query;
-  NamedPropertyDeleterCallback deleter;
+  void* getter;   // [Generic]NamedPropertyGetterCallback
+  void* setter;   // [Generic]NamedPropertySetterCallback
+  void* query;    // [Generic]NamedPropertyQueryCallback
+  void* deleter;  // [Generic]NamedPropertyDeleterCallback
   NamedPropertyEnumeratorCallback enumerator;
-  NamedPropertyDefinerCallback definer;
-  NamedPropertyDescriptorCallback descriptor;
+  void* definer;     // [Generic]NamedPropertyDefinerCallback
+  void* descriptor;  // [Generic]NamedPropertyDescriptorCallback
   Local<Value> data;
   PropertyHandlerFlags flags;
 };
@@ -849,13 +904,36 @@ struct IndexedPropertyHandlerConfiguration {
       IndexedPropertyDescriptorCallbackV2 descriptor,  //
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
-        query(query),
-        deleter(deleter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
-        definer(definer),
-        descriptor(descriptor),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(IndexedPropertyXxxCallbackV2)")
+  IndexedPropertyHandlerConfiguration(
+      IndexedPropertyGetterCallback getter,          //
+      IndexedPropertySetterCallback setter,          //
+      IndexedPropertyQueryCallback query,            //
+      IndexedPropertyDeleterCallback deleter,        //
+      IndexedPropertyEnumeratorCallback enumerator,  //
+      IndexedPropertyDefinerCallback definer,        //
+      IndexedPropertyDescriptorCallback descriptor,  //
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
         data(data),
         flags(flags) {}
 
@@ -867,10 +945,31 @@ struct IndexedPropertyHandlerConfiguration {
       IndexedPropertyEnumeratorCallback enumerator = nullptr,
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
-        query(query),
-        deleter(deleter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(nullptr),
+        descriptor(nullptr),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(IndexedPropertyXxxCallbackV2)")
+  explicit IndexedPropertyHandlerConfiguration(
+      IndexedPropertyGetterCallback getter,
+      IndexedPropertySetterCallback setter = nullptr,
+      IndexedPropertyQueryCallback query = nullptr,
+      IndexedPropertyDeleterCallback deleter = nullptr,
+      IndexedPropertyEnumeratorCallback enumerator = nullptr,
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(reinterpret_cast<void*>(query)),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
         definer(nullptr),
         descriptor(nullptr),
@@ -886,23 +985,45 @@ struct IndexedPropertyHandlerConfiguration {
       IndexedPropertyDefinerCallbackV2 definer,
       Local<Value> data = Local<Value>(),
       PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
-      : getter(getter),
-        setter(setter),
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
         query(nullptr),
-        deleter(deleter),
+        deleter(reinterpret_cast<void*>(deleter)),
         enumerator(enumerator),
-        definer(definer),
-        descriptor(descriptor),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
+        data(data),
+        flags(WithNewSignatureFlag(flags)) {}
+
+  V8_DEPRECATED(
+      "Provide interceptor callbacks with new signatures instead "
+      "(IndexedPropertyXxxCallbackV2)")
+  IndexedPropertyHandlerConfiguration(
+      IndexedPropertyGetterCallback getter,
+      IndexedPropertySetterCallback setter,
+      IndexedPropertyDescriptorCallback descriptor,
+      IndexedPropertyDeleterCallback deleter,
+      IndexedPropertyEnumeratorCallback enumerator,
+      IndexedPropertyDefinerCallback definer,
+      Local<Value> data = Local<Value>(),
+      PropertyHandlerFlags flags = PropertyHandlerFlags::kNone)
+      : getter(reinterpret_cast<void*>(getter)),
+        setter(reinterpret_cast<void*>(setter)),
+        query(nullptr),
+        deleter(reinterpret_cast<void*>(deleter)),
+        enumerator(enumerator),
+        definer(reinterpret_cast<void*>(definer)),
+        descriptor(reinterpret_cast<void*>(descriptor)),
         data(data),
         flags(flags) {}
 
-  IndexedPropertyGetterCallbackV2 getter;
-  IndexedPropertySetterCallbackV2 setter;
-  IndexedPropertyQueryCallbackV2 query;
-  IndexedPropertyDeleterCallbackV2 deleter;
+  void* getter;   // IndexedPropertyGetterCallback[V2]
+  void* setter;   // IndexedPropertySetterCallback[V2]
+  void* query;    // IndexedPropertyQueryCallback[V2]
+  void* deleter;  // IndexedPropertyDeleterCallback[V2]
   IndexedPropertyEnumeratorCallback enumerator;
-  IndexedPropertyDefinerCallbackV2 definer;
-  IndexedPropertyDescriptorCallbackV2 descriptor;
+  void* definer;     // IndexedPropertyDefinerCallback[V2]
+  void* descriptor;  // IndexedPropertyDescriptorCallback[V2]
   Local<Value> data;
   PropertyHandlerFlags flags;
 };
@@ -926,6 +1047,33 @@ class V8_EXPORT ObjectTemplate : public Template {
    * \param context The context in which the instance is created.
    */
   V8_WARN_UNUSED_RESULT MaybeLocal<Object> NewInstance(Local<Context> context);
+
+  /**
+   * Sets an accessor on the object template.
+   *
+   * Whenever the property with the given name is accessed on objects
+   * created from this ObjectTemplate the getter and setter callbacks
+   * are called instead of getting and setting the property directly
+   * on the JavaScript object.
+   *
+   * \param name The name of the property for which an accessor is added.
+   * \param getter The callback to invoke when getting the property.
+   * \param setter The callback to invoke when setting the property.
+   * \param data A piece of data that will be passed to the getter and setter
+   *   callbacks whenever they are invoked.
+   * \param attribute The attributes of the property for which an accessor
+   *   is added.
+   */
+  V8_DEPRECATED(
+      "Use SetNativeDataProperty or SetAccessorProperty instead depending on "
+      "the required semantics. See http://crbug.com/336325111. This method "
+      "will be removed in V8 12.8.")
+  void SetAccessor(
+      Local<Name> name, AccessorNameGetterCallback getter,
+      AccessorNameSetterCallback setter = nullptr,
+      Local<Value> data = Local<Value>(), PropertyAttribute attribute = None,
+      SideEffectType getter_side_effect_type = SideEffectType::kHasSideEffect,
+      SideEffectType setter_side_effect_type = SideEffectType::kHasSideEffect);
 
   /**
    * Sets a named property handler on the object template.

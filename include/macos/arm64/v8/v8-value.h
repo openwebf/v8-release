@@ -635,9 +635,8 @@ bool Value::QuickIsString() const {
   A obj = internal::ValueHelper::ValueAsAddress(this);
   if (!I::HasHeapObjectTag(obj)) return false;
 #if V8_STATIC_ROOTS_BOOL && !V8_MAP_PACKING
-  return I::CheckInstanceMapRange(obj,
-                                  I::StaticReadOnlyRoot::kStringMapLowerBound,
-                                  I::StaticReadOnlyRoot::kStringMapUpperBound);
+  return I::CheckInstanceMapRange(obj, I::StaticReadOnlyRoot::kFirstStringMap,
+                                  I::StaticReadOnlyRoot::kLastStringMap);
 #else
   return (I::GetInstanceType(obj) < I::kFirstNonstringType);
 #endif  // V8_STATIC_ROOTS_BOOL
